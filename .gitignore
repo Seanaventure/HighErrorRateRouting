@@ -1,0 +1,9 @@
+perrBVOutputs/**
+perrOutputs/**
+perrQFTCouplingOutputs/**
+perrQFTOutputs/**
+*.png
+*.pyc
+.vscode/**
+__pycache__/**
+
