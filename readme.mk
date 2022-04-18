@@ -4,3 +4,5 @@ Accuracy benchmarks take each circuit and run it 200 times with random noise and
 compilation time benchmarks time how long compilation took.
 For accuracy benchmarks, HERRTestSuiteBv.py is the most well commented. All other are just copy paste of that.
 HERR.py is the main routing algorithm
+
+To run this all, you just need qiskit installed
