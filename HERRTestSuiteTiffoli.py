@@ -106,12 +106,12 @@ for i in range(100):
     noiseGraph.add_edge(2, 3, weight=1.0-err3Rate)
     noiseGraph.add_edge(0, 3, weight=1.0-err4Rate)
 
-    HERR = HERR.HERR(squareCouplingMap, noiseGraph)
+    herr = HERR.HERR(squareCouplingMap, noiseGraph)
     basSwap = BasicSwap(squareCouplingMap)
 
     #print(squareCouplingMap)
     # Run HERR
-    HERRRes = HERR.run(circDag)
+    HERRRes = herr.run(circDag)
     updatedCirc = dag_to_circuit(HERRRes)
 
     bSwapRes = basSwap.run(circDag)

@@ -3,7 +3,7 @@ import networkx as nx
 import qiskit
 import HERR
 from qiskit.transpiler import CouplingMap
-from qiskit.transpiler.passes.routing import BasicSwap
+from qiskit.transpiler.passes.routing import *
 from qiskit import QuantumCircuit, execute, Aer, IBMQ
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.converters import circuit_to_dag
@@ -15,7 +15,7 @@ import qiskit.providers.aer.noise as noise
 from qiskit.tools.visualization import dag_drawer
 import random
 from qiskit.circuit.instruction import Instruction
-
+import time
 
 
 couplingList = list()
@@ -112,7 +112,7 @@ def countTwoQubitGates(transpiledCircuit):
                 num += 1
     return num
 
-s = '1011011'
+s = '10111011'
 n = len(s)
 # Let's see how it looks:
 circuit = QuantumCircuit(n)
@@ -128,28 +128,29 @@ circuit.measure_all()
 
 circDag = circuit_to_dag(circuit)
 
-targetCouplingMap = jakatraCouplingMap
-    # Transpile non HERR
-transpiledBasic = transpile(circuit, Aer.get_backend('qasm_simulator'),
-                                coupling_map=targetCouplingMap,
-                                basis_gates=basis_gates,
-                                routing_method='basic',
-                                layout_method='trivial')
-transpiledSabre = transpile(circuit, Aer.get_backend('qasm_simulator'),
-                                coupling_map=targetCouplingMap,
-                                basis_gates=basis_gates,
-                                routing_method='sabre',
-                                layout_method='trivial')
-transpiledStochastic = transpile(circuit, Aer.get_backend('qasm_simulator'),
-                                coupling_map=targetCouplingMap,
-                                basis_gates=basis_gates,
-                                routing_method='stochastic',
-                                layout_method='trivial')
-transpiledLookahead = transpile(circuit, Aer.get_backend('qasm_simulator'),
-                                coupling_map=targetCouplingMap,
-                                basis_gates=basis_gates,
-                                routing_method='lookahead',
-                                layout_method='trivial')
+targetCouplingMap = gridCouplingMap
+
+bSwap = BasicSwap(targetCouplingMap)
+baseTime = time.perf_counter()
+bSwap.run(circDag)
+bSwapTime = time.perf_counter() - baseTime
+
+sabreSwap = SabreSwap(targetCouplingMap)
+baseTime = time.perf_counter()
+sabreSwap.run(circDag)
+sabreSwapTime = time.perf_counter() - baseTime
+
+stochasticSwap = StochasticSwap(targetCouplingMap)
+baseTime = time.perf_counter()
+stochasticSwap.run(circDag)
+stochasticSwapTime = time.perf_counter() - baseTime
+
+lookAheadSwap = LookaheadSwap(targetCouplingMap)
+baseTime = time.perf_counter()
+lookAheadSwap.run(circDag)
+lookAheadSwapTime = time.perf_counter() - baseTime
+
+
 for i in range(200):
 
     # Create a noise model for the simulations
@@ -157,7 +158,7 @@ for i in range(200):
     errorRates = list()
     qiskitErrors = list()
 
-    for i in range(len(jakatraCouplingList)//2):
+    for i in range(len(gridCouplingList)//2):
         errorRates.append(random.randrange(1, 10, 1)/100.0)
         qiskitErrors.append(noise.depolarizing_error(errorRates[i], 2))
 
@@ -172,60 +173,20 @@ for i in range(200):
     errorIdex = 0
     for edge in uniqueEdges:
         noise_model.add_quantum_error(qiskitErrors[errorIdex], ['cx'], edge)
-        noiseGraph.add_edge(edge[0], edge[1], weight=errorRates[errorIdex])
+        noiseGraph.add_edge(edge[0], edge[1], weight=1-errorRates[errorIdex])
         errorIdex += 1
 
-    HERR = HERR.HERR(targetCouplingMap, noiseGraph)
+    herr = HERR.HERR(targetCouplingMap, noiseGraph)
     basSwap = BasicSwap(targetCouplingMap)
 
     #print(gridCouplingMap)
     # Run HERR
-    HERRRes = HERR.run(circDag)
+    baseTime = time.perf_counter()
+    HERRRes = herr.run(circDag)
+    HERRSwapTime = time.perf_counter() - baseTime
     updatedCirc = dag_to_circuit(HERRRes)
 
-    bSwapRes = basSwap.run(circDag)
-    bSwapCirc = dag_to_circuit(bSwapRes)
-
-    # Transpile HERR
-    transpiledHERR = transpile(updatedCirc, Aer.get_backend('qasm_simulator'),
-                                 coupling_map=targetCouplingMap,
-                                 basis_gates=basis_gates,
-                                 routing_method='basic',
-                                 layout_method='trivial')
-
-    # if transpiledNormal != transpiledHERR:
-    #     fName = "HERRQFTCouplingOutputs/HERRCirc" + str(i) + ".png"
-    #     fName2 = "HERRQFTCouplingOutputs/NonCirc" + str(i) + ".png"
-    #     transpiledHERR.draw(output='mpl', filename=fName)
-    #     transpiledNormal.draw(output='mpl', filename=fName2)
-    #     break
-    # HERRCnotGateNum = countTwoQubitGates(transpiledHERR)
-    # normalCnotGateNum  = countTwoQubitGates(transpiledNormal)
-    # print(str(HERRCnotGateNum) + " " + str(normalCnotGateNum))
-    sim = Aer.get_backend('qasm_simulator')
-
-    simResultHERR = sim.run(transpiledHERR, noise_model=noise_model).result()
-    simResultBasic = sim.run(transpiledBasic, noise_model=noise_model).result()
-    simResultSabre = sim.run(transpiledSabre, noise_model=noise_model).result()
-    simResultLookahead = sim.run(transpiledLookahead, noise_model=noise_model).result()
-    simResultStochastic = sim.run(transpiledStochastic, noise_model=noise_model).result()
-
-    # Output file and print results
-    fName = "HERRQFTCouplingOutputs/HERRCirc" + str(i) + ".png"
-    fName2 = "HERRQFTCouplingOutputs/NonCirc" + str(i) + ".png"
-    #updatedCirc.draw(output='mpl', filename=fName)
-    #bSwapCirc.draw(output='mpl', filename=fName2)
-    #if transpiledNormal != transpiledHERR:
-        #print("CIRCUIT CHANGED")
-        #updatedCirc.draw(output='mpl', filename=fName)
-        #bSwapCirc.draw(output='mpl', filename=fName2)
-        #print("Iter: " + str(i) + " ErrorRate of edges (0,1) (1, 2), (0, 2), (1, 3), (2, 3), (0, 3) counts for HERR/nonHERR:")
-        #print(str(err1Rate) + " " + str(err2Rate) + " " + str(err3Rate) + " " + str(err4Rate) + " " + str(err5Rate) + " " + str(err6Rate))
-    if s in simResultHERR.get_counts() and s in simResultBasic.get_counts() and s in simResultSabre.get_counts() and s in simResultLookahead.get_counts() and s in simResultStochastic.get_counts():
-        print(str(simResultHERR.get_counts()[s]/1024.0) + " " + str(simResultBasic.get_counts()[s]/1024.0) + " " + str(simResultSabre.get_counts()[s]/1024.0) + " " + str(simResultLookahead.get_counts()[s]/1024.0) + " " + str(simResultStochastic.get_counts()[s]/1024.0))
-    else:
-        print("Key error! Oops!")
-        #print("----------------------")
-
+    
+    print(str(HERRSwapTime) + " " + str(bSwapTime) + " " + str(sabreSwapTime) + " " + str(stochasticSwapTime) + " " + str(lookAheadSwapTime))
 
 

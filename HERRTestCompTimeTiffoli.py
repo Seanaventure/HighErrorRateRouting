@@ -3,7 +3,7 @@ import networkx as nx
 import qiskit
 import HERR
 from qiskit.transpiler import CouplingMap
-from qiskit.transpiler.passes.routing import *
+from qiskit.transpiler.passes.routing import BasicSwap
 from qiskit import QuantumCircuit, execute, Aer, IBMQ
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.converters import circuit_to_dag
@@ -15,6 +15,7 @@ import qiskit.providers.aer.noise as noise
 from qiskit.tools.visualization import dag_drawer
 import random
 from qiskit.circuit.instruction import Instruction
+from qiskit.transpiler.passes.routing import *
 import time
 
 
@@ -27,46 +28,11 @@ def countTwoQubitGates(transpiledCircuit):
                 num += 1
     return num
 
-s = '1101'
-n = len(s)
-
-circuit = QuantumCircuit(8, n)
-# Step 0
-
-circuit.x(n)  # the n+1 qubits are indexed 0...n, so the last qubit is index n
-
-circuit.barrier()  # just a visual aid for now
-
-# Step 1
-
-# range(n+1) returns [0,1,2,...,n] in Python. This covers all the qubits
-circuit.h(range(n+1))
-
-circuit.barrier()  # just a visual aid for now
-
-# Step 2
-
-for ii, yesno in enumerate(reversed(s)):
-    if yesno == '1':
-        circuit.cx(ii, n)
-
-circuit.barrier()  # just a visual aid for now
-
-# Step 3
-
-# range(n+1) returns [0,1,2,...,n] in Python. This covers all the qubits
-circuit.h(range(n+1))
-
-circuit.barrier()  # just a visual aid for now
-
-# measure the qubits indexed from 0 to n-1 and store them into the classical bits indexed 0 to n-
-circuit.measure(range(n), range(n))
-
-provider = IBMQ.load_account()
-backend = provider.get_backend('ibmq_lima')
-
-basis_gates = backend.configuration().basis_gates
-
+couplingList = list()
+for i in range(3):
+    for j in range(3):
+        if i is not j:
+            couplingList.append([i, j])
 
 squareCouplingList = list()
 for i in range(4):
@@ -76,35 +42,26 @@ for i in range(4):
                 squareCouplingList.append([i, j])
 squareCouplingList.append(([0, 3]))
 squareCouplingList.append(([3, 0]))
+provider = IBMQ.load_account()
+backend = provider.get_backend('ibmq_lima')
+
+basis_gates = backend.configuration().basis_gates
+
 squareCouplingMap = CouplingMap(squareCouplingList)
+couplingMap = CouplingMap(couplingList)
 
-
-gridCouplingList = list()
-for i in range(4):
-    for j in range(4):
-        if i is not j:
-            if abs(i-j) == 1:
-                gridCouplingList.append([i, j])
-for i in range(4,8):
-    for j in range(4,8):
-        if i is not j:
-            if abs(i-j) == 1:
-                gridCouplingList.append([i, j])
-
-gridCouplingList.append(([0, 4]))
-gridCouplingList.append(([4, 0]))
-gridCouplingList.append(([1, 5]))
-gridCouplingList.append(([5, 1]))
-gridCouplingList.append(([2, 6]))
-gridCouplingList.append(([6, 2]))
-gridCouplingList.append(([3, 7]))
-gridCouplingList.append(([7, 3]))
-
-gridCouplingMap = CouplingMap(gridCouplingList)
-
-jakatraCouplingList = [[0, 1], [1, 0], [1, 2], [2, 1], [1, 3], [3, 1], [3,5], [5,3], [4,5], [5,4], [6,5], [5,6]]
-jakatraCouplingMap = CouplingMap(jakatraCouplingList)
-circDag = circuit_to_dag(circuit)
+qcHERR = QuantumCircuit(4)
+qcHERR.x(0)
+qcHERR.x(1)
+qcHERR.ccx(0, 1, 2)
+qcHERR.measure_all()
+qcHERR = qcHERR.decompose()
+nonHERR = QuantumCircuit(4)
+nonHERR.x(0)
+nonHERR.x(1)
+nonHERR.ccx(0, 1, 2)
+nonHERR.measure_all()
+circDag = circuit_to_dag(qcHERR)
 
 targetCouplingMap = squareCouplingMap
 
@@ -154,18 +111,21 @@ for i in range(200):
         noiseGraph.add_edge(edge[0], edge[1], weight=1-errorRates[errorIdex])
         errorIdex += 1
 
-    HERR = HERR.HERR(targetCouplingMap, noiseGraph)
+    herr = HERR.HERR(targetCouplingMap, noiseGraph)
     basSwap = BasicSwap(targetCouplingMap)
 
     #print(gridCouplingMap)
     # Run HERR
     baseTime = time.perf_counter()
-    HERRRes = HERR.run(circDag)
+    HERRRes = herr.run(circDag)
     HERRSwapTime = time.perf_counter() - baseTime
     updatedCirc = dag_to_circuit(HERRRes)
 
     
     print(str(HERRSwapTime) + " " + str(bSwapTime) + " " + str(sabreSwapTime) + " " + str(stochasticSwapTime) + " " + str(lookAheadSwapTime))
+
+
+
 
 
 

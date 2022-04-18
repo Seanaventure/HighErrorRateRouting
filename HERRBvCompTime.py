@@ -18,19 +18,55 @@ from qiskit.circuit.instruction import Instruction
 import time
 
 
-couplingList = list()
-for i in range(4):
-    for j in range(4):
-        if i is not j:
-            couplingList.append([i, j])
+def countTwoQubitGates(transpiledCircuit):
+    num = 0
+    for gate in transpiledCircuit.data:
+        # print(type(gate[0]))
+        if issubclass(type(gate[0]), Instruction):
+            if gate[0].name == "cx":
+                num += 1
+    return num
 
+s = '1101'
+n = len(s)
+
+circuit = QuantumCircuit(8, n)
+# Step 0
+
+circuit.x(n)  # the n+1 qubits are indexed 0...n, so the last qubit is index n
+
+circuit.barrier()  # just a visual aid for now
+
+# Step 1
+
+# range(n+1) returns [0,1,2,...,n] in Python. This covers all the qubits
+circuit.h(range(n+1))
+
+circuit.barrier()  # just a visual aid for now
+
+# Step 2
+
+for ii, yesno in enumerate(reversed(s)):
+    if yesno == '1':
+        circuit.cx(ii, n)
+
+circuit.barrier()  # just a visual aid for now
+
+# Step 3
+
+# range(n+1) returns [0,1,2,...,n] in Python. This covers all the qubits
+circuit.h(range(n+1))
+
+circuit.barrier()  # just a visual aid for now
+
+# measure the qubits indexed from 0 to n-1 and store them into the classical bits indexed 0 to n-
+circuit.measure(range(n), range(n))
 
 provider = IBMQ.load_account()
 backend = provider.get_backend('ibmq_lima')
 
 basis_gates = backend.configuration().basis_gates
 
-couplingMap = CouplingMap(couplingList)
 
 squareCouplingList = list()
 for i in range(4):
@@ -41,6 +77,7 @@ for i in range(4):
 squareCouplingList.append(([0, 3]))
 squareCouplingList.append(([3, 0]))
 squareCouplingMap = CouplingMap(squareCouplingList)
+
 
 gridCouplingList = list()
 for i in range(4):
@@ -62,73 +99,14 @@ gridCouplingList.append(([2, 6]))
 gridCouplingList.append(([6, 2]))
 gridCouplingList.append(([3, 7]))
 gridCouplingList.append(([7, 3]))
+
 gridCouplingMap = CouplingMap(gridCouplingList)
 
 jakatraCouplingList = [[0, 1], [1, 0], [1, 2], [2, 1], [1, 3], [3, 1], [3,5], [5,3], [4,5], [5,4], [6,5], [5,6]]
 jakatraCouplingMap = CouplingMap(jakatraCouplingList)
-
-def qft_rotations(circuit, n):
-    """Performs qft on the first n qubits in circuit (without swaps)"""
-    if n == 0:
-        return circuit
-    n -= 1
-    circuit.h(n)
-    for qubit in range(n):
-        circuit.cp(pi/2**(n-qubit), qubit, n)
-    # At the end of our function, we call the same function again on
-    # the next qubits (we reduced n by one earlier in the function)
-    qft_rotations(circuit, n)
-
-
-def swap_registers(circuit, n):
-    for qubit in range(n//2):
-        circuit.swap(qubit, n-qubit-1)
-    return circuit
-
-
-def qft(circuit, n):
-    """QFT on the first n qubits in circuit"""
-    qft_rotations(circuit, n)
-    swap_registers(circuit, n)
-    return circuit
-
-
-def inverse_qft(circuit, n):
-    """Does the inverse QFT on the first n qubits in circuit"""
-    # First we create a QFT circuit of the correct size:
-    qft_circ = qft(QuantumCircuit(n), n)
-    # Then we take the inverse of this circuit
-    invqft_circ = qft_circ.inverse()
-    # And add it to the first n qubits in our existing circuit
-    circuit.append(invqft_circ, circuit.qubits[:n])
-    return circuit.decompose()  # .decompose() allows us to see the individual gates
-
-def countTwoQubitGates(transpiledCircuit):
-    num = 0
-    for gate in transpiledCircuit.data:
-        # print(type(gate[0]))
-        if issubclass(type(gate[0]), Instruction):
-            if gate[0].name == "cx":
-                num += 1
-    return num
-
-s = '10111011'
-n = len(s)
-# Let's see how it looks:
-circuit = QuantumCircuit(n)
-
-for ii, yesno in enumerate(reversed(s)):
-    if yesno == '1':
-        circuit.x(ii)
-
-
-qft(circuit, n)
-circuit = inverse_qft(circuit, n)
-circuit.measure_all()
-
 circDag = circuit_to_dag(circuit)
 
-targetCouplingMap = gridCouplingMap
+targetCouplingMap = squareCouplingMap
 
 bSwap = BasicSwap(targetCouplingMap)
 baseTime = time.perf_counter()
@@ -158,7 +136,7 @@ for i in range(200):
     errorRates = list()
     qiskitErrors = list()
 
-    for i in range(len(gridCouplingList)//2):
+    for i in range(len(squareCouplingList)//2):
         errorRates.append(random.randrange(1, 10, 1)/100.0)
         qiskitErrors.append(noise.depolarizing_error(errorRates[i], 2))
 
@@ -176,17 +154,18 @@ for i in range(200):
         noiseGraph.add_edge(edge[0], edge[1], weight=1-errorRates[errorIdex])
         errorIdex += 1
 
-    HERR = HERR.HERR(targetCouplingMap, noiseGraph)
+    herr = HERR.HERR(targetCouplingMap, noiseGraph)
     basSwap = BasicSwap(targetCouplingMap)
 
     #print(gridCouplingMap)
     # Run HERR
     baseTime = time.perf_counter()
-    HERRRes = HERR.run(circDag)
+    HERRRes = herr.run(circDag)
     HERRSwapTime = time.perf_counter() - baseTime
     updatedCirc = dag_to_circuit(HERRRes)
 
     
     print(str(HERRSwapTime) + " " + str(bSwapTime) + " " + str(sabreSwapTime) + " " + str(stochasticSwapTime) + " " + str(lookAheadSwapTime))
+
 
 

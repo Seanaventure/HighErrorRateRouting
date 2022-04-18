@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 import qiskit
-import ../HERR
+import HERR
 from qiskit.transpiler import CouplingMap
 from qiskit.transpiler.passes.routing import BasicSwap
 from qiskit import QuantumCircuit, execute, Aer, IBMQ
@@ -164,11 +164,11 @@ for i in range(200):
         noiseGraph.add_edge(edge[0], edge[1], weight=1-errorRates[errorIdex])
         errorIdex += 1
 
-    HERR = HERR.HERR(gridCouplingMap, noiseGraph)
+    herr = HERR.HERR(gridCouplingMap, noiseGraph)
     basSwap = BasicSwap(gridCouplingMap)
 
     # Run HERR
-    HERRRes = HERR.run(circDag)
+    HERRRes = herr.run(circDag)
     updatedCirc = dag_to_circuit(HERRRes)
 
     # We ran HERR, but we need to do the rest of the transpiling process to get it ready for hardware
