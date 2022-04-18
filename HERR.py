@@ -15,34 +15,33 @@ class HERR(TransformationPass):
 
     def __init__(self, couplingMap, qubitAccuracy, initial_layout=None, searchDepth=2):
         super().__init__()
+        # This is the constructor that initalizes all the input values
         self.couplingMap = couplingMap
         self.qubitAccuracy = qubitAccuracy
         self.initial_layout = initial_layout
         self.searchDepth = searchDepth
 
     def run(self, dag):
+        # The run function is be be called to run routing. The input is the DAG of the circuit being test,
+        # output is dag representing routed circuit
         new_dag = DAGCircuit()
         for qreg in dag.qregs.values():
             new_dag.add_qreg(qreg)
         for creg in dag.cregs.values():
             new_dag.add_creg(creg)
 
-        # if self.initial_layout is None:
-        #     if self.property_set["layout"]:
-        #         self.initial_layout = self.property_set["layout"]
-        #     else:
-        #         self.initial_layout = Layout.generate_trivial_layout(*dag.qregs.values())
-
-        # if len(dag.qubits) != len(self.initial_layout):
-        #     raise TranspilerError('The layout does not match the amount of qubits in the DAG')
-
         if len(dag.qubits) > len(self.couplingMap.physical_qubits):
             raise TranspilerError("The layout does not match the amount of qubits in the DAG")
         
+        # Sets up inputs
         canonical_register = dag.qregs['q']
         trivial_layout = Layout.generate_trivial_layout(canonical_register)
         current_layout = trivial_layout.copy()
         
+        # Basically: 1) iterate through each layer
+        # 2) Grab arugment qubits for a gate
+        # 3) Use search function to see if better edge exists
+        # 4) If so, add swaps. If not, default to BasicSwap
         for layer in dag.serial_layers():
             subdag = layer['graph']
             for gate in subdag.two_qubit_ops():
@@ -54,6 +53,7 @@ class HERR(TransformationPass):
                     swap_layer = DAGCircuit()
                     swap_layer.add_qreg(canonical_register)
 
+                    # Find shortest path returns the path of qubits to insert swap gates at
                     swapPath = self.find_shortest_path((physQArgs[0], physQArgs[1]), (betterEdge[0], betterEdge[1]))
                     for i in range(2):
                         if swapPath[i] is not None:
@@ -63,7 +63,6 @@ class HERR(TransformationPass):
 
                                     qubit_1 = current_layout[connected_wire_1]
                                     qubit_2 = current_layout[connected_wire_2]
-                                    #print("NOISE SWAP BETWEEN PHYSICAL QUBITS (" + str(connected_wire_1) + ", " + str(connected_wire_2) + "), log qubits (" + str(qubit_1) + ", " + str(qubit_2) + ")")
 
                                     swap_layer.apply_operation_back(SwapGate(),
                                                                         qargs=[qubit_1, qubit_2],
@@ -94,7 +93,6 @@ class HERR(TransformationPass):
                             qubit_1 = current_layout[connected_wire_1]
                             qubit_2 = current_layout[connected_wire_2]
 
-                            #print("ROUTING SWAP BETWEEN PHYSICAL QUBITS (" + str(connected_wire_1) + ", " + str(connected_wire_2) + "), log qubits (" + str(qubit_1) + ", " + str(qubit_2) + ")")
                             # create the swap operation
                             swap_layer.apply_operation_back(
                                 SwapGate(), qargs=[qubit_1, qubit_2], cargs=[]
@@ -140,8 +138,11 @@ class HERR(TransformationPass):
         bestEdge = (qubit1, qubit2)
         foundBetterEdge = False
         for edge in uniqueEdges:
+            # First parth of if checks if each qubit is within desired distance to source.
             if (self.couplingMap.distance(qubit1, edge[0]) <= depth and self.couplingMap.distance(qubit1, edge[1]) <= depth
                 and self.couplingMap.distance(qubit2, edge[0]) <= depth and self.couplingMap.distance(qubit2, edge[1]) <= depth):
+
+                # This function predicts the accuracy of a new link
                 newLinkAccuracy = self.calc_path_accuracy(bestEdge, edge, currentLayout)
                 if newLinkAccuracy > bestEdgeAccuracy:
                     bestEdgeAccuracy = newLinkAccuracy
@@ -153,6 +154,9 @@ class HERR(TransformationPass):
 
     def find_path_excluding(self, sourceQubit, destQubit, exQubit):
         # Get a subgraph of coupling map without Ex qubit, find shortest path
+        # This function finds the path from one qubit to another. Problem is since we are finding the path for BOTH qubits
+        # we encounter a problem if the path one qubit takes goes through the other qubit. So we create a subgraph that exludes the
+        # other argument qubit
         if sourceQubit == destQubit:
             return None 
         reducedCouplingGraph = nx.Graph()
@@ -173,12 +177,17 @@ class HERR(TransformationPass):
 
 
     def find_shortest_path(self, sourceQubits, destQubit):
+        """
+        This is a gross function, but basically we want to find the path from one set of qubits to another. Its difficult because the ordering of source
+        and destination qubits is arbitrary, so we want to make sure we are doing correct swaps. Ie if the source if (1,2) and the destination is (2,3),
+        we want to make sure we only insert one swap between 1 and 3, instead of 1 and 2 and 2 and 3.  
+        """
         qubitPath = [None, None]
-        #sourceQubits.sort()
-        #destQubit.sort()
         q0Paths = [None, None]
         q1Paths = [None, None]
         
+        # This part is super gross and could definitley be done better, but it is basically finding and comparing the possible paths each qubit could take
+        # For instance, Source q0 could swap to either destination q0 or q1, and Source q1 could do that same
         if destQubit[0] != sourceQubits[1]:
             q0Paths[0] = self.find_path_excluding(sourceQubits[0], destQubit[0], sourceQubits[1])
         if destQubit[1] != sourceQubits[1]:
@@ -189,6 +198,8 @@ class HERR(TransformationPass):
         if destQubit[1] != sourceQubits[0]:
             q1Paths[1] = self.find_path_excluding(sourceQubits[1], destQubit[1], sourceQubits[0])
 
+
+        # This is the part of that function that does the comparisons
         if sourceQubits[0] not in destQubit and sourceQubits[1] not in destQubit:
 
             if len(q0Paths[0]) <= len(q1Paths[0]):
@@ -197,13 +208,6 @@ class HERR(TransformationPass):
             else:
                 qubitPath[0] = q0Paths[1]
                 qubitPath[1] = q1Paths[0]
-
-            # if len(q0Paths[1]) < len(q1Paths[1]):
-            #     if len(qubitPath[0]) > len(q0Paths[1]):
-            #         qubitPath[0] = q0Paths[1]
-            # else:
-            #     if len(qubitPath[1]) > len(q1Paths[1]):
-            #         qubitPath[1] = q0Paths[1]
 
             if len(q0Paths[1]) < len(q0Paths[0]) and len(q0Paths[1]) < len(q1Paths[1]):
                 qubitPath[0] = q0Paths[1]
@@ -237,8 +241,8 @@ class HERR(TransformationPass):
         for swap in range(len(path) - 2):
             connected_wire_1 = path[swap]
             connected_wire_2 = path[swap + 1]
-            linkError = self.qubitAccuracy.edges[connected_wire_1, connected_wire_2]['weight']
-            accuracy = accuracy * (linkError**3)
+            linkAccuracy = self.qubitAccuracy.edges[connected_wire_1, connected_wire_2]['weight']
+            accuracy = accuracy * (linkAccuracy**3)
 
         return accuracy
 
@@ -258,14 +262,14 @@ class HERR(TransformationPass):
         for i in range(2):
             if qubitPath[i] is not None:
                 for swap in range(0, len(qubitPath[i])-1, 1):
+                    # Basically find the source and destination qubits of the swap
                     connected_wire_1 = qubitPath[i][swap]
                     connected_wire_2 = qubitPath[i][swap + 1]
 
-                    # qubit_1 = current_layout[connected_wire_1]
-                    # qubit_2 = current_layout[connected_wire_2]
-
-                    linkError = self.qubitAccuracy.edges[connected_wire_1, connected_wire_2]['weight']
-                    qubitPathAccuracy[i] = qubitPathAccuracy[i] * (linkError**3)
+                    # Reference the noise map to find the error rate
+                    linkAccuracy = self.qubitAccuracy.edges[connected_wire_1, connected_wire_2]['weight']
+                    # Link accuracy ^3 because each swap decomposes into 3 CNOTs
+                    qubitPathAccuracy[i] = qubitPathAccuracy[i] * (linkAccuracy**3)
 
         opAccuracy = self.qubitAccuracy.edges[destQubit[0], destQubit[1]]['weight']
         return opAccuracy*qubitPathAccuracy[0]*qubitPathAccuracy[1]

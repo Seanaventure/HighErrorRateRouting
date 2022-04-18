@@ -16,7 +16,7 @@ from qiskit.tools.visualization import dag_drawer
 import random
 from qiskit.circuit.instruction import Instruction
 
-
+# This function can be use to count the number of CNOT gates. Useful for debugging
 def countTwoQubitGates(transpiledCircuit):
     num = 0
     for gate in transpiledCircuit.data:
@@ -26,6 +26,13 @@ def countTwoQubitGates(transpiledCircuit):
                 num += 1
     return num
 
+
+
+
+"""
+For the Berentien Varanzi algorithm we need a secret string and make a circuit around it. All this was taken from qiskit
+https://qiskit.org/textbook/ch-algorithms/bernstein-vazirani.html
+"""
 s = '1101'
 n = len(s)
 
@@ -64,9 +71,12 @@ circuit.measure(range(n), range(n))
 provider = IBMQ.load_account()
 backend = provider.get_backend('ibmq_lima')
 
+# To compile the circuit we need the basis gates. Just take one from a random backend
 basis_gates = backend.configuration().basis_gates
 
 
+
+# TO make the coupling maps we annoyingly need to make a list specifying each connection
 squareCouplingList = list()
 for i in range(4):
     for j in range(4):
@@ -103,6 +113,8 @@ gridCouplingMap = CouplingMap(gridCouplingList)
 
 jakatraCouplingList = [[0, 1], [1, 0], [1, 2], [2, 1], [1, 3], [3, 1], [3,5], [5,3], [4,5], [5,4], [6,5], [5,6]]
 jakatraCouplingMap = CouplingMap(jakatraCouplingList)
+
+# We need to translate the circuit to a DAG to run it
 circDag = circuit_to_dag(circuit)
 transpiledBasic = transpile(circuit, Aer.get_backend('qasm_simulator'),
                                 coupling_map=gridCouplingMap,
@@ -130,7 +142,10 @@ for i in range(200):
     noise_model = noise.NoiseModel()
     errorRates = list()
     qiskitErrors = list()
+
+    # Assemble the noise graph. This is a graph that represents the noise of each link. Nodes are qubits and edges are the corresponding link
     for i in range(len(gridCouplingList)//2):
+        # Generate a random error for each link from 1-10%
         errorRates.append(random.randrange(1, 10, 1)/100.0)
         qiskitErrors.append(noise.depolarizing_error(errorRates[i], 2))
 
@@ -142,6 +157,7 @@ for i in range(200):
     noiseGraph = nx.Graph()
     noiseGraph.add_nodes_from([0, 7])
 
+    # Add quantum error for a randomly generated noise value
     errorIdex = 0
     for edge in uniqueEdges:
         noise_model.add_quantum_error(qiskitErrors[errorIdex], ['cx'], edge)
@@ -151,27 +167,20 @@ for i in range(200):
     HERR = HERR.HERR(gridCouplingMap, noiseGraph)
     basSwap = BasicSwap(gridCouplingMap)
 
-    #print(squareCouplingMap)
     # Run HERR
     HERRRes = HERR.run(circDag)
     updatedCirc = dag_to_circuit(HERRRes)
 
-    # bSwapRes = basSwap.run(circDag)
-    # bSwapCirc = dag_to_circuit(bSwapRes)
-
-    # Transpile HERR
+    # We ran HERR, but we need to do the rest of the transpiling process to get it ready for hardware
     transpiledHERR = transpile(updatedCirc, Aer.get_backend('qasm_simulator'),
                                  coupling_map=gridCouplingMap,
                                  basis_gates=basis_gates,
                                  routing_method='basic',
                                  layout_method='trivial')
 
-    # HERRCnotGateNum = countTwoQubitGates(transpiledHERR)
-    # normalCnotGateNum  = countTwoQubitGates(transpiledNormal)
-    # print(str(HERRCnotGateNum) + " " + str(normalCnotGateNum))
-
     sim = Aer.get_backend('qasm_simulator')
 
+    # Run all the compiled circuits
     simResultHERR = sim.run(transpiledHERR, noise_model=noise_model).result()
     simResultBasic = sim.run(transpiledBasic, noise_model=noise_model).result()
     simResultSabre = sim.run(transpiledSabre, noise_model=noise_model).result()
@@ -181,17 +190,9 @@ for i in range(200):
     # Output file and print results
     fName = "HERRQFTCouplingOutputs/HERRCirc" + str(i) + ".png"
     fName2 = "HERRQFTCouplingOutputs/NonCirc" + str(i) + ".png"
-    #updatedCirc.draw(output='mpl', filename=fName)
-    #bSwapCirc.draw(output='mpl', filename=fName2)
-    #if transpiledNormal != transpiledHERR:
-        #print("CIRCUIT CHANGED")
-        #updatedCirc.draw(output='mpl', filename=fName)
-        #bSwapCirc.draw(output='mpl', filename=fName2)
-        #print("Iter: " + str(i) + " ErrorRate of edges (0,1) (1, 2), (0, 2), (1, 3), (2, 3), (0, 3) counts for HERR/nonHERR:")
-        #print(str(err1Rate) + " " + str(err2Rate) + " " + str(err3Rate) + " " + str(err4Rate) + " " + str(err5Rate) + " " + str(err6Rate))
+
     if s in simResultHERR.get_counts() and s in simResultBasic.get_counts() and s in simResultSabre.get_counts() and s in simResultLookahead.get_counts() and s in simResultStochastic.get_counts():
         print(str(simResultHERR.get_counts()[s]/1024.0) + " " + str(simResultBasic.get_counts()[s]/1024.0) + " " + str(simResultSabre.get_counts()[s]/1024.0) + " " + str(simResultLookahead.get_counts()[s]/1024.0) + " " + str(simResultStochastic.get_counts()[s]/1024.0))
     else:
         print("Key error! Oops!")
-        #print("----------------------")
 
