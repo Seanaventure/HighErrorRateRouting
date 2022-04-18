@@ -1,9 +1,12 @@
-perrBVOutputs/**
-perrOutputs/**
-perrQFTCouplingOutputs/**
-perrQFTOutputs/**
+HERRBVOutputs/**
+HERROutputs/**
+HERRQFTCouplingOutputs/**
+HERRQFTOutputs/**
+HERRTiffoliOutputs/**
+HERRTiming/**
 *.png
 *.pyc
 .vscode/**
 __pycache__/**
+**.txt
 

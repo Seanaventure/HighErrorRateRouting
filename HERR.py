@@ -11,7 +11,7 @@ from qiskit.transpiler.exceptions import TranspilerError
 from qiskit.transpiler.layout import Layout
 from qiskit.dagcircuit import DAGNode
 
-class PERR(TransformationPass):
+class HERR(TransformationPass):
 
     def __init__(self, couplingMap, qubitAccuracy, initial_layout=None, searchDepth=2):
         super().__init__()
@@ -27,89 +27,87 @@ class PERR(TransformationPass):
         for creg in dag.cregs.values():
             new_dag.add_creg(creg)
 
-        if self.initial_layout is None:
-            if self.property_set["layout"]:
-                self.initial_layout = self.property_set["layout"]
-            else:
-                self.initial_layout = Layout.generate_trivial_layout(*dag.qregs.values())
+        # if self.initial_layout is None:
+        #     if self.property_set["layout"]:
+        #         self.initial_layout = self.property_set["layout"]
+        #     else:
+        #         self.initial_layout = Layout.generate_trivial_layout(*dag.qregs.values())
 
-        if len(dag.qubits) != len(self.initial_layout):
-            raise TranspilerError('The layout does not match the amount of qubits in the DAG')
+        # if len(dag.qubits) != len(self.initial_layout):
+        #     raise TranspilerError('The layout does not match the amount of qubits in the DAG')
 
-        if len(self.couplingMap.physical_qubits) != len(self.initial_layout):
-            raise TranspilerError(
-                "Mappers require to have the layout to be the same size as the coupling map")
+        if len(dag.qubits) > len(self.couplingMap.physical_qubits):
+            raise TranspilerError("The layout does not match the amount of qubits in the DAG")
         
         canonical_register = dag.qregs['q']
         trivial_layout = Layout.generate_trivial_layout(canonical_register)
         current_layout = trivial_layout.copy()
-
+        
         for layer in dag.serial_layers():
             subdag = layer['graph']
             for gate in subdag.two_qubit_ops():
                 physQArgs = [current_layout[gate.qargs[0]], current_layout[gate.qargs[1]]]
-
-                if self.couplingMap.distance(physQArgs[0], physQArgs[1]) != 1:
-                    # If we can perform no noise based swaps, make sure the qubits are connecting in the coupling map
-                    # This routing algorithm is taken form the basic_swap.py module in Qiskit terra
-                    # Insert a new layer with the SWAP(s).
+                # If the two qubits are not attached at the coupling map add swap to connect
+                betterEdge = self.find_better_link(physQArgs[0], physQArgs[1], current_layout, self.searchDepth)
+                if betterEdge is not None:
+                    # Lets insert swap to go to the better edge
                     swap_layer = DAGCircuit()
                     swap_layer.add_qreg(canonical_register)
 
-                    path = self.couplingMap.shortest_undirected_path(physQArgs[0], physQArgs[1])
-                    for swap in range(len(path) - 2):
-                        connected_wire_1 = path[swap]
-                        connected_wire_2 = path[swap + 1]
+                    swapPath = self.find_shortest_path((physQArgs[0], physQArgs[1]), (betterEdge[0], betterEdge[1]))
+                    for i in range(2):
+                        if swapPath[i] is not None:
+                            for swap in range(0, len(swapPath[i])-1, 1):
+                                    connected_wire_1 = swapPath[i][swap]
+                                    connected_wire_2 = swapPath[i][swap + 1]
 
-                        qubit_1 = current_layout[connected_wire_1]
-                        qubit_2 = current_layout[connected_wire_2]
+                                    qubit_1 = current_layout[connected_wire_1]
+                                    qubit_2 = current_layout[connected_wire_2]
+                                    #print("NOISE SWAP BETWEEN PHYSICAL QUBITS (" + str(connected_wire_1) + ", " + str(connected_wire_2) + "), log qubits (" + str(qubit_1) + ", " + str(qubit_2) + ")")
 
-                        #print("ROUTING SWAP BETWEEN PHYSICAL QUBITS (" + str(connected_wire_1) + ", " + str(connected_wire_2) + "), log qubits (" + str(qubit_1) + ", " + str(qubit_2) + ")")
-                        # create the swap operation
-                        swap_layer.apply_operation_back(
-                            SwapGate(), qargs=[qubit_1, qubit_2], cargs=[]
-                        )
+                                    swap_layer.apply_operation_back(SwapGate(),
+                                                                        qargs=[qubit_1, qubit_2],
+                                                                        cargs=[])
 
                     # layer insertion
                     order = current_layout.reorder_bits(new_dag.qubits)
                     new_dag.compose(swap_layer, qubits=order)
 
                     # update current_layout
-                    for swap in range(len(path) - 2):
-                        current_layout.swap(path[swap], path[swap + 1])       
+                    for i in range(2):
+                        if swapPath[i] is not None:
+                            for swap in range(0, len(swapPath[i])-1, 1):
+                                current_layout.swap(swapPath[i][swap], swapPath[i][swap + 1])  
                 else:
-                #print(current_layout)
-                    # If the two qubits are not attached at the coupling map add swap to connect
-                    betterEdge = self.find_better_link(physQArgs[0], physQArgs[1], current_layout, self.searchDepth)
-                    if betterEdge is not None:
-                        # Lets insert swap to go to the better edge
+                    if self.couplingMap.distance(physQArgs[0], physQArgs[1]) != 1:
+                        # If we can perform no noise based swaps, make sure the qubits are connecting in the coupling map
+                        # This routing algorithm is taken form the basic_swap.py module in Qiskit terra
+                        # Insert a new layer with the SWAP(s).
                         swap_layer = DAGCircuit()
                         swap_layer.add_qreg(canonical_register)
 
-                        swapPath = self.find_shortest_path((physQArgs[0], physQArgs[1]), (betterEdge[0], betterEdge[1]))
-                        for i in range(2):
-                            if swapPath[i] is not None:
-                                for swap in range(0, len(swapPath[i])-1, 1):
-                                        connected_wire_1 = swapPath[i][swap]
-                                        connected_wire_2 = swapPath[i][swap + 1]
+                        path = self.couplingMap.shortest_undirected_path(physQArgs[0], physQArgs[1])
+                        for swap in range(len(path) - 2):
+                            connected_wire_1 = path[swap]
+                            connected_wire_2 = path[swap + 1]
 
-                                        qubit_1 = current_layout[connected_wire_1]
-                                        qubit_2 = current_layout[connected_wire_2]
-                                        #print("NOISE SWAP BETWEEN PHYSICAL QUBITS (" + str(connected_wire_1) + ", " + str(connected_wire_2) + "), log qubits (" + str(qubit_1) + ", " + str(qubit_2) + ")")
+                            qubit_1 = current_layout[connected_wire_1]
+                            qubit_2 = current_layout[connected_wire_2]
 
-                                        swap_layer.apply_operation_back(SwapGate(),
-                                                                            qargs=[qubit_1, qubit_2],
-                                                                            cargs=[])
+                            #print("ROUTING SWAP BETWEEN PHYSICAL QUBITS (" + str(connected_wire_1) + ", " + str(connected_wire_2) + "), log qubits (" + str(qubit_1) + ", " + str(qubit_2) + ")")
+                            # create the swap operation
+                            swap_layer.apply_operation_back(
+                                SwapGate(), qargs=[qubit_1, qubit_2], cargs=[]
+                            )
 
                         # layer insertion
                         order = current_layout.reorder_bits(new_dag.qubits)
                         new_dag.compose(swap_layer, qubits=order)
 
                         # update current_layout
-                        for i in range(2):
-                            if swapPath[i] is not None:
-                                for swap in range(0, len(swapPath[i])-1, 1):
-                                    current_layout.swap(swapPath[i][swap], swapPath[i][swap + 1])  
+                        for swap in range(len(path) - 2):
+                            current_layout.swap(path[swap], path[swap + 1])       
+
                             
             order = current_layout.reorder_bits(new_dag.qubits)
             new_dag.compose(subdag, qubits=order)
@@ -137,8 +135,8 @@ class PERR(TransformationPass):
         if [qubit1, qubit2] in self.qubitAccuracy.edges():
             bestEdgeAccuracy =  self.qubitAccuracy.edges[qubit1, qubit2]['weight']
         else:
-            bestEdgeAccuracy = 0
-            
+            bestEdgeAccuracy = self.calc_shortest_path_accuracy(qubit1, qubit2)
+
         bestEdge = (qubit1, qubit2)
         foundBetterEdge = False
         for edge in uniqueEdges:
@@ -164,7 +162,13 @@ class PERR(TransformationPass):
             if exQubit not in edge:
                 subGraphEdges.append(edge)
         reducedCouplingGraph.add_edges_from(subGraphEdges)
-        shortestPath = nx.shortest_path(reducedCouplingGraph, sourceQubit, destQubit) 
+        if sourceQubit in reducedCouplingGraph and destQubit in reducedCouplingGraph:
+            try:
+                shortestPath = nx.shortest_path(reducedCouplingGraph, sourceQubit, destQubit)
+            except:
+                shortestPath = None
+        else:
+            shortestPath = None
         return shortestPath
 
 
@@ -225,7 +229,19 @@ class PERR(TransformationPass):
             else:
                 qubitPath[1] = q1Paths[1]
         return qubitPath
-        
+    
+    def calc_shortest_path_accuracy(self, qubit1, qubit2):
+        path = self.couplingMap.shortest_undirected_path(qubit1, qubit2)
+        accuracy = 1.0
+
+        for swap in range(len(path) - 2):
+            connected_wire_1 = path[swap]
+            connected_wire_2 = path[swap + 1]
+            linkError = self.qubitAccuracy.edges[connected_wire_1, connected_wire_2]['weight']
+            accuracy = accuracy * (linkError**3)
+
+        return accuracy
+
     def calc_path_accuracy(self, sourceQubits, destQubit, current_layout):
         # Determines accuracy of a path from an old link to a new link
         # Error rate of new link: = (EnewLink)*(Error of Path for qubit 0^3)*(Error of Path for qubit 1^3)
