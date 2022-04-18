@@ -6,3 +6,9 @@ For accuracy benchmarks, HERRTestSuiteBv.py is the most well commented. All othe
 HERR.py is the main routing algorithm
 
 To run this all, you just need qiskit installed
+
+To run a benchmark, its just: 
+python Benchmarkname.py
+
+That said, it outputs a ton of text so I like to pipe it to a file like
+python Benchmarkname.py > testResults.txt
